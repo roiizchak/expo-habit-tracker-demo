@@ -42,3 +42,6 @@ yarn-error.*
 
 # dev-server QR artifact (not part of the app)
 expo-qr.png
+
+# playwright-cli session artifacts
+.playwright-cli/

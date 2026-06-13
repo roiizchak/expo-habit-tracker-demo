@@ -16,7 +16,9 @@ A polished, **offline-first habit tracker** built with Expo SDK 54 and React Nat
 
 ## Screenshots
 
-> 📸 _Coming soon._ Drop device captures into `assets/screenshots/` and link them here.
+| Onboarding | Home | Insights |
+|:---:|:---:|:---:|
+| ![Onboarding](assets/screenshots/01-onboarding.png) | ![Home](assets/screenshots/02-home.png) | ![Insights](assets/screenshots/03-insights.png) |
 
 ## Tech stack
 
