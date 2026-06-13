@@ -39,3 +39,6 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# dev-server QR artifact (not part of the app)
+expo-qr.png
