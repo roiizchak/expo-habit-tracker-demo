@@ -3,6 +3,7 @@
     "name": "habit-tracker-tmp",
     "slug": "habit-tracker-tmp",
     "version": "1.0.0",
+    "scheme": "habittracker",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -24,7 +25,8 @@
     "plugins": [
       "expo-audio",
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      "expo-web-browser"
     ]
   }
 }

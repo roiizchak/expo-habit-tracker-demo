@@ -3,6 +3,7 @@ import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 
 export type RootStackParamList = {
+  Auth: undefined;
   Onboarding: undefined;
   Tabs: undefined;
   AddEditHabit: { habitId?: string } | undefined;

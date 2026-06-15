@@ -33,10 +33,32 @@ export type Settings = {
   defaultReminder: Reminder;
 };
 
+/**
+ * One pending write to push to Supabase. Self-contained (carries its own payload)
+ * so a delete can be flushed even after the entity is gone from local state, and
+ * the queue survives an app kill. Deduped by `key` on enqueue — the latest op for
+ * an entity wins. See lib/sync.ts for how each op maps to a DB row.
+ *   key formats: habit `h:<id>`, challenge `c:<id>`, log `l:<habitId>:<date>`,
+ *   settings `s`, profile `p`.
+ */
+export type SyncOp =
+  | { key: string; entity: 'habit'; action: 'upsert'; habit: Habit }
+  | { key: string; entity: 'habit'; action: 'delete'; id: string }
+  | { key: string; entity: 'challenge'; action: 'upsert'; challenge: Challenge }
+  | { key: string; entity: 'challenge'; action: 'delete'; id: string }
+  | { key: string; entity: 'log'; action: 'upsert'; habitId: string; date: string; count: number }
+  | { key: string; entity: 'log'; action: 'delete'; habitId: string; date: string }
+  | { key: string; entity: 'settings'; action: 'upsert'; settings: Settings }
+  | { key: string; entity: 'profile'; action: 'upsert'; onboarded: boolean };
+
 export type Persisted = {
   schemaVersion: number;
   habits: Habit[];
   challenges: Challenge[];
   settings: Settings;
   onboarded: boolean;
+  /** Offline-first sync queue: local writes not yet confirmed on the server. */
+  pending: SyncOp[];
+  /** ISO timestamp of the newest remote row merged in, for delta pulls. */
+  lastSyncedAt: string | null;
 };

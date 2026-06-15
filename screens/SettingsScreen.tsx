@@ -2,6 +2,7 @@ import React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/HabitStore';
+import { useAuth } from '../store/AuthProvider';
 import { colors, radius, space, tintOf, type as typo } from '../theme/tokens';
 import type { TabScreenProps } from '../navigation/types';
 
@@ -29,7 +30,15 @@ function Row({
 
 export function SettingsScreen({ navigation }: TabScreenProps<'Settings'>) {
   const { settings, setSettings, habits, resetAll } = useStore();
+  const { session, signOut } = useAuth();
   const insets = useSafeAreaInsets();
+
+  const confirmSignOut = () => {
+    Alert.alert('Sign out?', 'Your data stays synced and will be here when you sign back in.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+    ]);
+  };
 
   const confirmReset = () => {
     Alert.alert('Reset everything?', 'Deletes all habits, history, and challenges. This cannot be undone.', [
@@ -90,6 +99,13 @@ export function SettingsScreen({ navigation }: TabScreenProps<'Settings'>) {
         ))}
         <View style={styles.divider} />
         <Row label="Add habit" onPress={() => navigation.navigate('AddEditHabit')} right={<Text style={styles.chev}>＋</Text>} />
+      </View>
+
+      <Text style={styles.section}>Account</Text>
+      <View style={styles.group}>
+        <Row label="Signed in" hint={session?.user?.email ?? 'Synced account'} />
+        <View style={styles.divider} />
+        <Row label="Sign out" onPress={confirmSignOut} right={<Text style={styles.chev}>↪</Text>} />
       </View>
 
       <Text style={styles.section}>Danger zone</Text>
