@@ -3,7 +3,7 @@
  * Continue-with-Google web-browser flow. Shown by RootNavigator whenever there
  * is no Supabase session.
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -28,6 +28,7 @@ export function AuthScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const passwordRef = useRef<TextInput>(null);
 
   const submit = async () => {
     if (busy) return;
@@ -105,6 +106,8 @@ export function AuthScreen() {
               value={code}
               onChangeText={setCode}
               editable={!busy}
+              returnKeyType="go"
+              onSubmitEditing={verify}
             />
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -154,8 +157,12 @@ export function AuthScreen() {
               value={email}
               onChangeText={setEmail}
               editable={!busy}
+              returnKeyType="next"
+              submitBehavior="submit"
+              onSubmitEditing={() => passwordRef.current?.focus()}
             />
             <TextInput
+              ref={passwordRef}
               style={styles.input}
               placeholder="Password"
               placeholderTextColor={colors.inkMuted}
@@ -163,6 +170,8 @@ export function AuthScreen() {
               value={password}
               onChangeText={setPassword}
               editable={!busy}
+              returnKeyType={mode === 'signin' ? 'go' : 'done'}
+              onSubmitEditing={submit}
             />
           </View>
 

@@ -54,3 +54,8 @@ expo-qr.png
 
 # playwright-cli session artifacts
 .playwright-cli/
+
+# Playwright E2E: captured auth session (real tokens) + run output — never commit
+e2e/.auth.json
+test-results/
+playwright-report/

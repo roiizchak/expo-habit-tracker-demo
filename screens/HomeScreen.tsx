@@ -1,13 +1,16 @@
-import React, { useMemo } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppState, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useStore } from '../store/HabitStore';
+import { useAuth } from '../store/AuthProvider';
 import { useReward } from '../store/FeedbackProvider';
 import { isDoneOn } from '../lib/date';
 import { firstActiveChallenge, challengeProgress } from '../lib/challenge';
+import { fetchNudge, getCachedCoach } from '../lib/coach';
 import { HabitCard } from '../components/HabitCard';
 import { ProgressRing } from '../components/ProgressRing';
+import { CoachCard } from '../components/CoachCard';
 import { colors, radius, space, tintOf, type as typo } from '../theme/tokens';
 import { useReducedMotion } from '../theme/motion';
 import type { TabScreenProps } from '../navigation/types';
@@ -20,14 +23,47 @@ function greeting(): string {
 }
 
 export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
-  const { habits, challenges, today } = useStore();
+  const { habits, challenges, today, ready, onboarded } = useStore();
   const { logToday } = useStore();
+  const { userId, session } = useAuth();
   const { reward } = useReward();
   const reduced = useReducedMotion();
   const insets = useSafeAreaInsets();
 
   const doneCount = useMemo(() => habits.filter((h) => isDoneOn(h, today)).length, [habits, today]);
   const overall = habits.length ? doneCount / habits.length : 0;
+
+  // Coaching nudge: auto-fetched once the user is past onboarding and has habits.
+  // The Edge Function caches per local day + rate-limits, so mounts/foregrounds
+  // are cheap. Gate avoids any Claude call mid-onboarding.
+  const [nudge, setNudge] = useState<string | null>(null);
+  const [nudgeLoading, setNudgeLoading] = useState(false);
+  const canCoach = ready && onboarded && !!session && !!userId && habits.length > 0;
+
+  const loadNudge = useCallback(async () => {
+    if (!userId) return;
+    setNudgeLoading(true);
+    const text = await fetchNudge(userId);
+    if (text) setNudge(text);
+    setNudgeLoading(false);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!canCoach || !userId) return;
+    let active = true;
+    getCachedCoach(userId).then((c) => {
+      if (active && c.nudge) setNudge(c.nudge);
+    });
+    loadNudge();
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') loadNudge();
+    });
+    return () => {
+      active = false;
+      sub.remove();
+    };
+    // `today` in deps so a midnight rollover refetches the new day's nudge.
+  }, [canCoach, userId, today, loadNudge]);
 
   const challenge = firstActiveChallenge(challenges);
   const challengeHabit = challenge ? habits.find((h) => h.id === challenge.habitId) : undefined;
@@ -60,6 +96,17 @@ export function HomeScreen({ navigation }: TabScreenProps<'Home'>) {
           <Text style={styles.subtitle}>
             {doneCount} of {habits.length} done
           </Text>
+
+          {canCoach && (
+            <CoachCard
+              title="Your coach"
+              text={nudge}
+              loading={nudgeLoading}
+              placeholder="Keep logging — a nudge will appear here."
+              textTestID="coach-nudge"
+              style={styles.coach}
+            />
+          )}
 
           {challenge && challengeHabit && (
             <Pressable
@@ -138,6 +185,7 @@ const styles = StyleSheet.create({
   title: { ...typo.display, color: colors.ink },
   subtitle: { ...typo.body, color: colors.inkSecondary },
   ringPct: { ...typo.caption, color: colors.ink, fontFamily: typo.bodyStrong.fontFamily },
+  coach: { marginTop: space.md },
   challenge: {
     flexDirection: 'row',
     alignItems: 'center',

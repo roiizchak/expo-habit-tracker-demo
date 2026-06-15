@@ -1,11 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/HabitStore';
+import { useAuth } from '../store/AuthProvider';
 import { isDoneOn, streakOf, completionRate, dateKey } from '../lib/date';
+import { fetchReflection, getCachedCoach, type ReflectionPeriod } from '../lib/coach';
 import { WeeklyBars } from '../components/WeeklyBars';
 import { Heatmap } from '../components/Heatmap';
-import { Segmented } from '../components/ui';
+import { CoachCard } from '../components/CoachCard';
+import { Button, Segmented } from '../components/ui';
 import { colors, radius, space, tintOf, type as typo } from '../theme/tokens';
 
 function StatCard({ value, label }: { value: string; label: string }) {
@@ -18,9 +21,41 @@ function StatCard({ value, label }: { value: string; label: string }) {
 }
 
 export function InsightsScreen() {
-  const { habits } = useStore();
+  const { habits, ready, onboarded } = useStore();
+  const { userId, session } = useAuth();
   const [tab, setTab] = useState<'charts' | 'log'>('charts');
   const insets = useSafeAreaInsets();
+
+  // Reflection summaries: manual ("Generate"), per the product decision. The Edge
+  // Function caches per ISO-week / month, so re-tapping the same period is free.
+  const [reflPeriod, setReflPeriod] = useState<ReflectionPeriod>('week');
+  const [refl, setRefl] = useState<{ week: string | null; month: string | null }>({
+    week: null,
+    month: null,
+  });
+  const [reflLoading, setReflLoading] = useState(false);
+  const canCoach = ready && onboarded && !!session && !!userId && habits.length > 0;
+
+  useEffect(() => {
+    if (!userId) return;
+    let active = true;
+    getCachedCoach(userId).then((c) => {
+      if (active) {
+        setRefl({ week: c['reflection-week'] ?? null, month: c['reflection-month'] ?? null });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
+
+  const generateReflection = useCallback(async () => {
+    if (!userId) return;
+    setReflLoading(true);
+    const text = await fetchReflection(userId, reflPeriod);
+    if (text) setRefl((r) => ({ ...r, [reflPeriod]: text }));
+    setReflLoading(false);
+  }, [userId, reflPeriod]);
 
   const last7Dates = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => {
@@ -80,6 +115,35 @@ export function InsightsScreen() {
             <StatCard value={`${bestStreak}`} label="Best streak" />
             <StatCard value={`${Math.round((weeklyRatios.at(-1) ?? 0) * 100)}%`} label="Today" />
           </View>
+
+          {canCoach && (
+            <CoachCard
+              title="AI reflection"
+              emoji="🧠"
+              text={refl[reflPeriod]}
+              loading={reflLoading}
+              placeholder="Generate an AI recap of your recent consistency."
+              textTestID="coach-reflection"
+              footer={
+                <>
+                  <Segmented<ReflectionPeriod>
+                    value={reflPeriod}
+                    onChange={setReflPeriod}
+                    options={[
+                      { value: 'week', label: 'Week' },
+                      { value: 'month', label: 'Month' },
+                    ]}
+                  />
+                  <Button
+                    label={reflLoading ? 'Generating…' : 'Generate'}
+                    onPress={generateReflection}
+                    disabled={reflLoading}
+                    testID="coach-generate"
+                  />
+                </>
+              }
+            />
+          )}
 
           <Text style={styles.section}>This week</Text>
           <View style={styles.panel}>

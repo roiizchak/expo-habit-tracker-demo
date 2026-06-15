@@ -47,15 +47,18 @@ export function Button({
   variant = 'primary',
   disabled,
   style,
+  testID,
 }: {
   label: string;
   onPress: () => void;
   variant?: ButtonVariant;
   disabled?: boolean;
   style?: StyleProp<ViewStyle>;
+  testID?: string;
 }) {
   return (
     <Pressable
+      testID={testID}
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => [
