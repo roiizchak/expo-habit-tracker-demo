@@ -10,6 +10,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
 import { useStore } from '../store/HabitStore';
+import { useAuth } from '../store/AuthProvider';
+import { AuthScreen } from '../screens/AuthScreen';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
 import { HomeScreen } from '../screens/HomeScreen';
 import { InsightsScreen } from '../screens/InsightsScreen';
@@ -75,6 +77,7 @@ function Tabs() {
 }
 
 export function RootNavigator() {
+  const { sessionReady, session } = useAuth();
   const { ready, onboarded } = useStore();
   const onboardedRef = useRef(onboarded);
   onboardedRef.current = onboarded;
@@ -119,14 +122,17 @@ export function RootNavigator() {
     if (onboarded) flushPending();
   }, [onboarded]);
 
-  if (!ready) {
+  // Splash while auth resolves, or while the signed-in user's store hydrates.
+  if (!sessionReady || (session && !ready)) {
     return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   }
 
   return (
     <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPending}>
       <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
-        {!onboarded ? (
+        {!session ? (
+          <Stack.Screen name="Auth" component={AuthScreen} />
+        ) : !onboarded ? (
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         ) : (
           <>

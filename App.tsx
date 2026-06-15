@@ -17,6 +17,7 @@ import {
   Inter_700Bold,
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
+import { AuthProvider } from './store/AuthProvider';
 import { HabitProvider } from './store/HabitStore';
 import { FeedbackProvider } from './store/FeedbackProvider';
 import { RootNavigator } from './navigation';
@@ -38,11 +39,13 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="light-content" backgroundColor={colors.bg} />
-      <HabitProvider>
-        <FeedbackProvider>
-          <RootNavigator />
-        </FeedbackProvider>
-      </HabitProvider>
+      <AuthProvider>
+        <HabitProvider>
+          <FeedbackProvider>
+            <RootNavigator />
+          </FeedbackProvider>
+        </HabitProvider>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

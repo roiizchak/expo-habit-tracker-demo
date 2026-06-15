@@ -8,6 +8,7 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
+.ht-export-check/
 
 # Native
 .kotlin/
@@ -31,7 +32,15 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# supabase CLI scratch (contains the db password — never commit)
+.supabase-dbpw.txt
+.supabase-create.txt
+
+# Google OAuth client secret download — never commit
+client_secret_*.json
 
 # typescript
 *.tsbuildinfo

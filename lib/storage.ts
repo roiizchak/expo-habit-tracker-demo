@@ -4,11 +4,18 @@
  * never loses data or crashes on an old shape (e.g. the original `done: string[]`).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Persisted, Habit, Settings } from './types';
+import * as Crypto from 'expo-crypto';
+import type { Persisted, Habit, Settings, SyncOp } from './types';
 import { habitColors } from '../theme/tokens';
 import { todayKey } from './date';
 
-export const STORAGE_KEY = '@habits/v1';
+// Cache is now per-user: the signed-in user's id is appended so two accounts on
+// one device never share data. `keyFor(null)` is a pre-auth fallback (unused once
+// the auth gate is in place, but kept so storage is callable without a user).
+const KEY_PREFIX = '@habits/v1';
+export const keyFor = (userId: string | null): string =>
+  userId ? `${KEY_PREFIX}/${userId}` : KEY_PREFIX;
+
 export const SCHEMA_VERSION = 2; // v1 = done:string[] era, v2 = log era
 
 export const defaultSettings: Settings = {
@@ -17,8 +24,9 @@ export const defaultSettings: Settings = {
   defaultReminder: { hour: 9, minute: 0 },
 };
 
-let idCounter = 0;
-const newId = (): string => `${Date.now()}-${idCounter++}`;
+// UUIDs (not timestamp-counter): ids double as cloud PKs, and two offline devices
+// must never mint the same id. Crypto.randomUUID() is synchronous on SDK 54.
+const newId = (): string => Crypto.randomUUID();
 
 export function makeSeed(): Habit[] {
   const base = todayKey();
@@ -99,12 +107,14 @@ export function normalize(raw: any): Persisted {
     challenges,
     settings: { ...defaultSettings, ...(raw?.settings ?? {}) },
     onboarded: Boolean(raw?.onboarded),
+    pending: Array.isArray(raw?.pending) ? (raw.pending as SyncOp[]) : [],
+    lastSyncedAt: typeof raw?.lastSyncedAt === 'string' ? raw.lastSyncedAt : null,
   };
 }
 
-export async function loadState(): Promise<Persisted | null> {
+export async function loadState(userId: string | null): Promise<Persisted | null> {
   try {
-    const json = await AsyncStorage.getItem(STORAGE_KEY);
+    const json = await AsyncStorage.getItem(keyFor(userId));
     if (json == null) return null;
     return normalize(JSON.parse(json));
   } catch {
@@ -112,17 +122,17 @@ export async function loadState(): Promise<Persisted | null> {
   }
 }
 
-export async function saveState(state: Persisted): Promise<void> {
+export async function saveState(userId: string | null, state: Persisted): Promise<void> {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    await AsyncStorage.setItem(keyFor(userId), JSON.stringify(state));
   } catch {
     // best-effort; ignore write failures
   }
 }
 
-export async function clearState(): Promise<void> {
+export async function clearState(userId: string | null): Promise<void> {
   try {
-    await AsyncStorage.removeItem(STORAGE_KEY);
+    await AsyncStorage.removeItem(keyFor(userId));
   } catch {
     // ignore
   }
