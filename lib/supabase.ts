@@ -18,13 +18,15 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  // Loud in dev: a missing env means the app has no backend to talk to.
-  console.error(
-    'Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY — check your .env file.'
+  // Fail fast: an empty-string fallback would build a non-functional client and
+  // surface as cryptic runtime errors. Crash at startup with an actionable message.
+  throw new Error(
+    'Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY. ' +
+      'Copy .env.example to .env and fill in the values from the Supabase dashboard.'
   );
 }
 
-export const supabase = createClient(supabaseUrl ?? '', supabaseKey ?? '', {
+export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
     storage: AsyncStorage,
     autoRefreshToken: true,

@@ -167,6 +167,8 @@ const systemReflection = (period: 'week' | 'month') =>
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
+  // Only POST mutates/bills — reject anything else (GET prefetch, etc.) explicitly.
+  if (req.method !== 'POST') return json({ text: null, error: 'method_not_allowed' }, 405);
 
   try {
     // 1. Auth guard — reject before constructing any client.
@@ -247,7 +249,8 @@ Deno.serve(async (req: Request) => {
       .insert({ user_id: user.id, kind, period_key: periodKey, is_pending: true });
     if (insErr) {
       if (insErr.code === '23505') return json({ text: null, pending: true });
-      return json({ text: null, error: insErr.message }, 500);
+      console.error('[ai-coach] sentinel insert failed', insErr);
+      return json({ text: null, error: 'internal_error' }, 500);
     }
 
     // Only ever removes an UN-finalized sentinel (content still null), so a
@@ -362,11 +365,14 @@ Deno.serve(async (req: Request) => {
 
       return json({ text, kind, periodKey, cached: false });
     } catch (modelErr) {
+      console.error('[ai-coach] model call failed', modelErr);
       await cleanupSentinel(); // free the slot so a retry can run
-      return json({ text: null, error: `model_error: ${String(modelErr)}` });
+      return json({ text: null, error: 'model_error' });
     }
   } catch (err) {
     // Never throw to the client — the app stays usable if the backend hiccups.
-    return json({ text: null, error: String(err) });
+    // Log the detail server-side; return an opaque code so internals don't leak.
+    console.error('[ai-coach] unhandled', err);
+    return json({ text: null, error: 'internal_error' });
   }
 });

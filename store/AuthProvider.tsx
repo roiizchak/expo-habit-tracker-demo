@@ -36,7 +36,10 @@ type AuthValue = {
   // OTP convention — recovery needs the "Reset Password" email template to send
   // {{ .Token }} (a code), not the default {{ .ConfirmationURL }} link.
   // Server-side existence check used to BLOCK recovery for unregistered emails.
-  checkEmailExists: (email: string) => Promise<{ exists: boolean; error: string | null }>;
+  checkEmailExists: (
+    email: string,
+    captchaToken: string
+  ) => Promise<{ exists: boolean; error: string | null }>;
   sendPasswordReset: (email: string) => Promise<Result>;
   verifyPasswordResetOtp: (
     email: string,
@@ -160,18 +163,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
-  // Check whether an email maps to an account, via the account_exists RPC (runs
-  // SECURITY DEFINER server-side since anon can't read auth.users). The recover
-  // screen calls this to block unregistered emails. A non-null `error` means the
-  // check itself failed (e.g. offline) — the caller must NOT treat that as "no
-  // account", only `exists === false` means that.
-  const checkEmailExists = async (email: string) => {
+  // Check whether an email maps to an account, via the CAPTCHA-gated `check-email`
+  // Edge Function. The underlying account_exists RPC is now service-role-only (no anon
+  // enumeration oracle); the function verifies a Cloudflare Turnstile token before it
+  // runs. The recover screen calls this to block unregistered emails. A non-null `error`
+  // (captcha_failed, offline, etc.) means the check itself failed — the caller must NOT
+  // treat that as "no account"; only `exists === false` with no error means that.
+  const checkEmailExists = async (email: string, captchaToken: string) => {
     try {
-      const { data, error } = await supabase.rpc('account_exists', {
-        p_email: email.trim().toLowerCase(),
+      const { data, error } = await supabase.functions.invoke('check-email', {
+        body: { email: email.trim().toLowerCase(), captchaToken },
       });
       if (error) return { exists: false, error: error.message };
-      return { exists: data === true, error: null };
+      if (data?.error) return { exists: false, error: data.error };
+      // Only an EXPLICIT boolean is a verdict. A missing/malformed `exists` must surface
+      // as a check failure — never silently resolve to "no account" (CLAUDE.md contract).
+      if (data?.exists === true) return { exists: true, error: null };
+      if (data?.exists === false) return { exists: false, error: null };
+      return { exists: false, error: 'invalid_response' };
     } catch (e) {
       // A thrown transport error (offline, DNS) must surface as a check failure,
       // not a missing account — keep the error path distinct from `exists:false`.

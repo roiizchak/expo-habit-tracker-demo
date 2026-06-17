@@ -15,8 +15,12 @@ import {
   View,
 } from 'react-native';
 import { Screen, Button } from '../components/ui';
+import { Turnstile } from '../components/Turnstile';
 import { colors, font, radius, space, type as typo } from '../theme/tokens';
 import { useAuth } from '../store/AuthProvider';
+
+// Public Turnstile site key (safe to ship; the secret lives in the Edge Function).
+const TURNSTILE_SITE_KEY = process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY;
 
 export function AuthScreen() {
   const {
@@ -40,6 +44,14 @@ export function AuthScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Turnstile token gating the forgot-password existence check. Single-use: cleared
+  // after each attempt; `captchaKey` remounts the widget to fetch a fresh token.
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaKey, setCaptchaKey] = useState(0);
+  const refreshCaptcha = () => {
+    setCaptchaToken(null);
+    setCaptchaKey((k) => k + 1);
+  };
   const passwordRef = useRef<TextInput>(null);
   const newPasswordRef = useRef<TextInput>(null);
   const confirmPasswordRef = useRef<TextInput>(null);
@@ -74,6 +86,7 @@ export function AuthScreen() {
     setCode('');
     setNewPassword('');
     setConfirmPassword('');
+    refreshCaptcha();
   };
 
   const submit = async () => {
@@ -86,10 +99,20 @@ export function AuthScreen() {
         setError('Enter your email.');
         return;
       }
+      if (!TURNSTILE_SITE_KEY) {
+        setError('Verification is unavailable. Please try again later.');
+        return;
+      }
+      if (!captchaToken) {
+        setError('Please complete the verification below.');
+        return;
+      }
       await withBusy(async () => {
-        // Block recovery for unregistered emails. A failed check (offline, etc.)
-        // is NOT "no account" — show a retryable error and stay on this step.
-        const chk = await checkEmailExists(email);
+        // Block recovery for unregistered emails, gated by the Turnstile token. A failed
+        // check (captcha, offline, etc.) is NOT "no account" — show a retryable error and
+        // stay on this step. The token is single-use, so refresh it after every attempt.
+        const chk = await checkEmailExists(email, captchaToken);
+        refreshCaptcha();
         if (chk.error) {
           if (mountedRef.current) setError("Couldn't verify that email. Try again.");
           return;
@@ -112,8 +135,18 @@ export function AuthScreen() {
       return;
     }
 
-    if (!email.trim() || password.length < 6) {
-      setError('Enter an email and a password of at least 6 characters.');
+    if (!email.trim()) {
+      setError('Enter your email.');
+      return;
+    }
+    // New accounts must meet the server password policy (>=8). Sign-in stays
+    // length-agnostic so legacy/shorter passwords can still authenticate.
+    if (mode === 'signup' && password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (mode === 'signin' && !password) {
+      setError('Enter your password.');
       return;
     }
     await withBusy(async () => {
@@ -144,8 +177,8 @@ export function AuthScreen() {
         setError('Enter the 6-digit code from your email.');
         return;
       }
-      if (newPassword.length < 6) {
-        setError('Password must be at least 6 characters.');
+      if (newPassword.length < 8) {
+        setError('Password must be at least 8 characters.');
         return;
       }
       if (newPassword !== confirmPassword) {
@@ -323,6 +356,15 @@ export function AuthScreen() {
               />
             )}
           </View>
+
+          {recovering && TURNSTILE_SITE_KEY ? (
+            <Turnstile
+              key={captchaKey}
+              siteKey={TURNSTILE_SITE_KEY}
+              onToken={setCaptchaToken}
+              onError={() => setCaptchaToken(null)}
+            />
+          ) : null}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {notice ? <Text style={styles.notice}>{notice}</Text> : null}
