@@ -19,6 +19,7 @@ import { SettingsScreen } from '../screens/SettingsScreen';
 import { AddEditHabitScreen } from '../screens/AddEditHabitScreen';
 import { HabitDetailScreen } from '../screens/HabitDetailScreen';
 import { ChallengeRewardScreen } from '../screens/ChallengeRewardScreen';
+import { ChangePasswordScreen } from '../screens/ChangePasswordScreen';
 import { colors, font } from '../theme/tokens';
 import type { RootStackParamList, TabsParamList } from './types';
 
@@ -77,7 +78,7 @@ function Tabs() {
 }
 
 export function RootNavigator() {
-  const { sessionReady, session } = useAuth();
+  const { sessionReady, session, recoveryNeedsPassword } = useAuth();
   const { ready, onboarded } = useStore();
   const onboardedRef = useRef(onboarded);
   onboardedRef.current = onboarded;
@@ -132,6 +133,15 @@ export function RootNavigator() {
       <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
         {!session ? (
           <Stack.Screen name="Auth" component={AuthScreen} />
+        ) : recoveryNeedsPassword ? (
+          // Recovery code was verified but the password update failed: force the
+          // user to finish setting a new password before anything else.
+          <Stack.Screen
+            name="ChangePassword"
+            component={ChangePasswordScreen}
+            initialParams={{ recovery: true }}
+            options={{ gestureEnabled: false }}
+          />
         ) : !onboarded ? (
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         ) : (
@@ -157,6 +167,11 @@ export function RootNavigator() {
               name="ChallengeReward"
               component={ChallengeRewardScreen}
               options={{ presentation: 'fullScreenModal', gestureEnabled: false }}
+            />
+            <Stack.Screen
+              name="ChangePassword"
+              component={ChangePasswordScreen}
+              options={{ presentation: 'modal' }}
             />
           </>
         )}

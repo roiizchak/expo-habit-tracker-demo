@@ -30,7 +30,7 @@ function Row({
 
 export function SettingsScreen({ navigation }: TabScreenProps<'Settings'>) {
   const { settings, setSettings, habits, resetAll } = useStore();
-  const { session, signOut } = useAuth();
+  const { session, signOut, hasPasswordIdentity } = useAuth();
   const insets = useSafeAreaInsets();
 
   const confirmSignOut = () => {
@@ -104,6 +104,16 @@ export function SettingsScreen({ navigation }: TabScreenProps<'Settings'>) {
       <Text style={styles.section}>Account</Text>
       <View style={styles.group}>
         <Row label="Signed in" hint={session?.user?.email ?? 'Synced account'} />
+        {hasPasswordIdentity() && (
+          <>
+            <View style={styles.divider} />
+            <Row
+              label="Change password"
+              onPress={() => navigation.navigate('ChangePassword')}
+              right={<Text style={styles.chev}>›</Text>}
+            />
+          </>
+        )}
         <View style={styles.divider} />
         <Row label="Sign out" onPress={confirmSignOut} right={<Text style={styles.chev}>↪</Text>} />
       </View>

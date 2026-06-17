@@ -1,9 +1,10 @@
 /**
  * Sign-in / sign-up gate. Email + password (works fully in Expo Go) plus a
  * Continue-with-Google web-browser flow. Shown by RootNavigator whenever there
- * is no Supabase session.
+ * is no Supabase session. Also hosts the forgot-password flow (email -> 6-digit
+ * recovery code + new password), which reuses the same OTP convention as signup.
  */
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,111 +19,252 @@ import { colors, font, radius, space, type as typo } from '../theme/tokens';
 import { useAuth } from '../store/AuthProvider';
 
 export function AuthScreen() {
-  const { signInWithEmail, signUpWithEmail, verifyEmailOtp, resendSignup, signInWithGoogle } = useAuth();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+  const {
+    signInWithEmail,
+    signUpWithEmail,
+    verifyEmailOtp,
+    resendSignup,
+    signInWithGoogle,
+    checkEmailExists,
+    sendPasswordReset,
+    verifyPasswordResetOtp,
+  } = useAuth();
+  const [mode, setMode] = useState<'signin' | 'signup' | 'recover'>('signin');
   // 'auth' = email/password form, 'verify' = enter the 6-digit code from email.
   const [stage, setStage] = useState<'auth' | 'verify'>('auth');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const passwordRef = useRef<TextInput>(null);
+  const newPasswordRef = useRef<TextInput>(null);
+  const confirmPasswordRef = useRef<TextInput>(null);
+  // A successful recovery verifyOtp creates a session, which makes RootNavigator
+  // unmount this screen mid-async — guard every post-await state setter. If the
+  // update then fails, AuthProvider raises a recovery gate (forced set-password
+  // screen), so there's no retry UI to render here.
+  const mountedRef = useRef(true);
+  // Synchronous in-flight guard — closes the double-tap window before React
+  // commits `busy`. Also ensures a thrown error never leaves `busy` stuck on.
+  const inFlight = useRef(false);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  const withBusy = async (fn: () => Promise<void>) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    try {
+      await fn();
+    } catch (e) {
+      if (mountedRef.current) setError(e instanceof Error ? e.message : 'Something went wrong.');
+    } finally {
+      inFlight.current = false;
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  const resetTransient = () => {
+    setError(null);
+    setNotice(null);
+    setPassword('');
+    setCode('');
+    setNewPassword('');
+    setConfirmPassword('');
+  };
 
   const submit = async () => {
     if (busy) return;
     setError(null);
     setNotice(null);
+
+    if (mode === 'recover') {
+      if (!email.trim()) {
+        setError('Enter your email.');
+        return;
+      }
+      await withBusy(async () => {
+        // Block recovery for unregistered emails. A failed check (offline, etc.)
+        // is NOT "no account" — show a retryable error and stay on this step.
+        const chk = await checkEmailExists(email);
+        if (chk.error) {
+          if (mountedRef.current) setError("Couldn't verify that email. Try again.");
+          return;
+        }
+        if (!chk.exists) {
+          if (mountedRef.current) setError('No account found for that email.');
+          return;
+        }
+        const res = await sendPasswordReset(email);
+        if (res.error) {
+          if (mountedRef.current) setError(res.error);
+          return;
+        }
+        if (mountedRef.current) {
+          setStage('verify');
+          // Existence is confirmed above, so the copy can be definite here.
+          setNotice('We emailed you a 6-digit code. Enter it with your new password.');
+        }
+      });
+      return;
+    }
+
     if (!email.trim() || password.length < 6) {
       setError('Enter an email and a password of at least 6 characters.');
       return;
     }
-    setBusy(true);
-    const res =
-      mode === 'signin'
-        ? await signInWithEmail(email, password)
-        : await signUpWithEmail(email, password);
-    setBusy(false);
-    if (res.error) {
-      setError(res.error);
-    } else if (mode === 'signup' && 'needsConfirm' in res && res.needsConfirm) {
-      // Email confirmation is on -> collect the 6-digit code in-app.
-      setStage('verify');
-      setNotice('We emailed you a 6-digit code. Enter it below to confirm.');
-    }
-    // On success the auth listener swaps the navigator to the app automatically.
+    await withBusy(async () => {
+      const res =
+        mode === 'signin'
+          ? await signInWithEmail(email, password)
+          : await signUpWithEmail(email, password);
+      if (res.error) {
+        if (mountedRef.current) setError(res.error);
+      } else if (mode === 'signup' && 'needsConfirm' in res && res.needsConfirm) {
+        // Email confirmation is on -> collect the 6-digit code in-app.
+        if (mountedRef.current) {
+          setStage('verify');
+          setNotice('We emailed you a 6-digit code. Enter it below to confirm.');
+        }
+      }
+      // On success the auth listener swaps the navigator to the app automatically.
+    });
   };
 
   const verify = async () => {
     if (busy) return;
     setError(null);
     setNotice(null);
+
+    if (mode === 'recover') {
+      if (code.trim().length < 6) {
+        setError('Enter the 6-digit code from your email.');
+        return;
+      }
+      if (newPassword.length < 6) {
+        setError('Password must be at least 6 characters.');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setError('Passwords do not match.');
+        return;
+      }
+      await withBusy(async () => {
+        const res = await verifyPasswordResetOtp(email, code, newPassword);
+        // Success -> auth listener logs you in with the new password.
+        // updateFailed -> AuthProvider raised the recovery gate; the navigator
+        // swaps to the forced set-password screen, so nothing to do here either.
+        if (res.error && !res.updateFailed && mountedRef.current) setError(res.error);
+      });
+      return;
+    }
+
+    // signup confirmation
     if (code.trim().length < 6) {
       setError('Enter the 6-digit code from your email.');
       return;
     }
-    setBusy(true);
-    const res = await verifyEmailOtp(email, code);
-    setBusy(false);
-    if (res.error) setError(res.error);
-    // On success the auth listener logs you in automatically.
+    await withBusy(async () => {
+      const res = await verifyEmailOtp(email, code);
+      if (res.error && mountedRef.current) setError(res.error);
+      // On success the auth listener logs you in automatically.
+    });
   };
 
   const resend = async () => {
     if (busy) return;
     setError(null);
-    setBusy(true);
-    const res = await resendSignup(email);
-    setBusy(false);
-    setNotice(res.error ? null : 'New code sent.');
-    if (res.error) setError(res.error);
+    await withBusy(async () => {
+      const res = mode === 'recover' ? await sendPasswordReset(email) : await resendSignup(email);
+      if (mountedRef.current) {
+        setNotice(res.error ? null : 'New code sent.');
+        if (res.error) setError(res.error);
+      }
+    });
   };
 
   const google = async () => {
     if (busy) return;
     setError(null);
     setNotice(null);
-    setBusy(true);
-    const res = await signInWithGoogle();
-    setBusy(false);
-    if (res.error) setError(res.error);
+    await withBusy(async () => {
+      const res = await signInWithGoogle();
+      if (res.error && mountedRef.current) setError(res.error);
+    });
   };
 
   if (stage === 'verify') {
+    const recovering = mode === 'recover';
     return (
       <Screen>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.fill}>
           <View style={styles.body}>
-            <Text style={styles.brand}>Confirm email</Text>
+            <Text style={styles.brand}>{recovering ? 'Reset password' : 'Confirm email'}</Text>
             <Text style={styles.subtitle}>Sent to {email}</Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder="6-digit code"
-              placeholderTextColor={colors.inkMuted}
-              keyboardType="number-pad"
-              maxLength={6}
-              value={code}
-              onChangeText={setCode}
-              editable={!busy}
-              returnKeyType="go"
-              onSubmitEditing={verify}
-            />
+            <View style={styles.form}>
+              <TextInput
+                style={styles.input}
+                placeholder="6-digit code"
+                placeholderTextColor={colors.inkMuted}
+                keyboardType="number-pad"
+                maxLength={6}
+                value={code}
+                onChangeText={setCode}
+                editable={!busy}
+                returnKeyType={recovering ? 'next' : 'go'}
+                submitBehavior={recovering ? 'submit' : undefined}
+                onSubmitEditing={recovering ? () => newPasswordRef.current?.focus() : verify}
+              />
+              {recovering && (
+                <>
+                  <TextInput
+                    ref={newPasswordRef}
+                    style={styles.input}
+                    placeholder="New password"
+                    placeholderTextColor={colors.inkMuted}
+                    secureTextEntry
+                    value={newPassword}
+                    onChangeText={setNewPassword}
+                    editable={!busy}
+                    returnKeyType="next"
+                    submitBehavior="submit"
+                    onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+                  />
+                  <TextInput
+                    ref={confirmPasswordRef}
+                    style={styles.input}
+                    placeholder="Confirm new password"
+                    placeholderTextColor={colors.inkMuted}
+                    secureTextEntry
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    editable={!busy}
+                    returnKeyType="go"
+                    onSubmitEditing={verify}
+                  />
+                </>
+              )}
+            </View>
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
             {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
-            <Button label={busy ? '' : 'Confirm'} onPress={verify} disabled={busy} />
+            <Button
+              label={busy ? '' : recovering ? 'Reset password' : 'Confirm'}
+              onPress={verify}
+              disabled={busy}
+            />
             {busy ? <ActivityIndicator color={colors.amber} style={styles.spinner} /> : null}
 
             <Button label="Resend code" onPress={resend} variant="secondary" disabled={busy} />
             <Button
               label="Back"
               onPress={() => {
-                setError(null);
-                setNotice(null);
-                setCode('');
+                resetTransient();
                 setStage('auth');
               }}
               variant="ghost"
@@ -134,6 +276,7 @@ export function AuthScreen() {
     );
   }
 
+  const recovering = mode === 'recover';
   return (
     <Screen>
       <KeyboardAvoidingView
@@ -143,7 +286,11 @@ export function AuthScreen() {
         <View style={styles.body}>
           <Text style={styles.brand}>Habit Tracker</Text>
           <Text style={styles.subtitle}>
-            {mode === 'signin' ? 'Welcome back.' : 'Create your account.'}
+            {recovering
+              ? 'Reset your password.'
+              : mode === 'signin'
+              ? 'Welcome back.'
+              : 'Create your account.'}
           </Text>
 
           <View style={styles.form}>
@@ -157,41 +304,62 @@ export function AuthScreen() {
               value={email}
               onChangeText={setEmail}
               editable={!busy}
-              returnKeyType="next"
-              submitBehavior="submit"
-              onSubmitEditing={() => passwordRef.current?.focus()}
+              returnKeyType={recovering ? 'go' : 'next'}
+              submitBehavior={recovering ? undefined : 'submit'}
+              onSubmitEditing={recovering ? submit : () => passwordRef.current?.focus()}
             />
-            <TextInput
-              ref={passwordRef}
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor={colors.inkMuted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-              editable={!busy}
-              returnKeyType={mode === 'signin' ? 'go' : 'done'}
-              onSubmitEditing={submit}
-            />
+            {!recovering && (
+              <TextInput
+                ref={passwordRef}
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor={colors.inkMuted}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+                editable={!busy}
+                returnKeyType={mode === 'signin' ? 'go' : 'done'}
+                onSubmitEditing={submit}
+              />
+            )}
           </View>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
           {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
           <Button
-            label={busy ? '' : mode === 'signin' ? 'Sign in' : 'Sign up'}
+            label={busy ? '' : recovering ? 'Send reset code' : mode === 'signin' ? 'Sign in' : 'Sign up'}
             onPress={submit}
             disabled={busy}
           />
           {busy ? <ActivityIndicator color={colors.amber} style={styles.spinner} /> : null}
 
-          <Button label="Continue with Google" onPress={google} variant="secondary" disabled={busy} />
+          {!recovering && (
+            <Button label="Continue with Google" onPress={google} variant="secondary" disabled={busy} />
+          )}
+
+          {mode === 'signin' && (
+            <Button
+              label="Forgot password?"
+              onPress={() => {
+                resetTransient();
+                setMode('recover');
+              }}
+              variant="ghost"
+              disabled={busy}
+            />
+          )}
 
           <Button
-            label={mode === 'signin' ? "New here? Create an account" : 'Have an account? Sign in'}
+            label={
+              recovering
+                ? 'Back to sign in'
+                : mode === 'signin'
+                ? 'New here? Create an account'
+                : 'Have an account? Sign in'
+            }
             onPress={() => {
-              setError(null);
-              setNotice(null);
+              resetTransient();
               setMode((m) => (m === 'signin' ? 'signup' : 'signin'));
             }}
             variant="ghost"

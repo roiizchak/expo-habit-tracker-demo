@@ -9,6 +9,7 @@ export type RootStackParamList = {
   AddEditHabit: { habitId?: string } | undefined;
   HabitDetail: { habitId: string };
   ChallengeReward: { challengeId: string };
+  ChangePassword: { recovery?: boolean } | undefined;
 };
 
 export type TabsParamList = {
