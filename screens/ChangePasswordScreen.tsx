@@ -29,7 +29,7 @@ import type { RootScreenProps } from '../navigation/types';
 
 export function ChangePasswordScreen({ navigation, route }: RootScreenProps<'ChangePassword'>) {
   const recovery = route.params?.recovery ?? false;
-  const { changePassword, retryPasswordUpdate } = useAuth();
+  const { changePassword, retryPasswordUpdate, recoveryError } = useAuth();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -42,6 +42,12 @@ export function ChangePasswordScreen({ navigation, route }: RootScreenProps<'Cha
   // commits `busy`, so a fast double-tap can't issue two updateUser calls.
   const inFlight = useRef(false);
   useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // Surface why the original update failed (e.g. "new password must differ from the
+  // old one") so the forced gate isn't a silent dead-end.
+  useEffect(() => {
+    if (recovery && recoveryError) setError(recoveryError);
+  }, [recovery, recoveryError]);
 
   // In recovery mode this is a forced gate (the user MUST set a password); block
   // Android hardware-back, which `gestureEnabled:false` doesn't cover (iOS-only).

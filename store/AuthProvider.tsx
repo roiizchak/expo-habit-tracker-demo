@@ -59,6 +59,9 @@ type AuthValue = {
   // AuthScreen reads this once on mount to show a confirmation notice, then clears it.
   recoveryComplete: boolean;
   clearRecoveryComplete: () => void;
+  // When verifyOtp succeeded but the password update failed, the server's reason
+  // (weak/reused password, etc.) so the forced gate can tell the user what to fix.
+  recoveryError: string | null;
 };
 
 const Ctx = createContext<AuthValue | null>(null);
@@ -91,6 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [recoveryNeedsPassword, setRecoveryNeedsPassword] = useState(false);
   const [recoveryComplete, setRecoveryComplete] = useState(false);
   const clearRecoveryComplete = () => setRecoveryComplete(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -126,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
   const clearRecoveryNeedsPassword = () => {
     setRecoveryNeedsPassword(false);
+    setRecoveryError(null);
     AsyncStorage.removeItem(RECOVERY_KEY).catch(() => {});
   };
 
@@ -220,7 +225,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error: uErr } = await supabase.auth.updateUser({ password: newPassword });
     if (uErr) {
       // verifyOtp already created the session (and unmounted the Auth screen);
-      // raise the recovery gate so the user can finish setting a password.
+      // raise the recovery gate so the user can finish setting a password, and
+      // carry the server's reason across so the gate can show what to fix.
+      setRecoveryError(uErr.message);
       raiseRecoveryGate();
       return { error: uErr.message, updateFailed: true };
     }
@@ -292,8 +299,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearRecoveryNeedsPassword,
       recoveryComplete,
       clearRecoveryComplete,
+      recoveryError,
     }),
-    [session, sessionReady, recoveryNeedsPassword, recoveryComplete]
+    [session, sessionReady, recoveryNeedsPassword, recoveryComplete, recoveryError]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
