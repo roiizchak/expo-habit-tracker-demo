@@ -18,20 +18,10 @@ import { Screen, Button } from '../components/ui';
 import { Turnstile } from '../components/Turnstile';
 import { colors, font, radius, space, type as typo } from '../theme/tokens';
 import { useAuth } from '../store/AuthProvider';
+import { passwordIssue } from '../lib/password';
 
 // Public Turnstile site key (safe to ship; the secret lives in the Edge Function).
 const TURNSTILE_SITE_KEY = process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY;
-
-// Mirrors the server password policy (min length 8 + lower_upper_letters_digits) so the
-// user gets immediate feedback instead of a post-submit server rejection. Server is still
-// authoritative; this is UX. Returns an error string, or null when the password is valid.
-function passwordIssue(pw: string): string | null {
-  if (pw.length < 8) return 'Password must be at least 8 characters.';
-  if (!/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw)) {
-    return 'Password needs uppercase, lowercase, and a number.';
-  }
-  return null;
-}
 
 export function AuthScreen() {
   const {
@@ -43,6 +33,8 @@ export function AuthScreen() {
     checkEmailExists,
     sendPasswordReset,
     verifyPasswordResetOtp,
+    recoveryComplete,
+    clearRecoveryComplete,
   } = useAuth();
   const [mode, setMode] = useState<'signin' | 'signup' | 'recover'>('signin');
   // 'auth' = email/password form, 'verify' = enter the 6-digit code from email.
@@ -75,6 +67,17 @@ export function AuthScreen() {
   // commits `busy`. Also ensures a thrown error never leaves `busy` stuck on.
   const inFlight = useRef(false);
   useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // Just completed a password reset (AuthProvider signed us out and bounced here):
+  // land on the sign-in form with a confirmation, then clear the one-shot flag.
+  useEffect(() => {
+    if (recoveryComplete) {
+      setMode('signin');
+      setStage('auth');
+      setNotice('Password updated. Sign in with your new password.');
+      clearRecoveryComplete();
+    }
+  }, [recoveryComplete]);
 
   const withBusy = async (fn: () => Promise<void>) => {
     if (inFlight.current) return;

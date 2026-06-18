@@ -54,6 +54,11 @@ type AuthValue = {
   // navigator gates a forced "set new password" screen on this until it clears.
   recoveryNeedsPassword: boolean;
   clearRecoveryNeedsPassword: () => void;
+  // True right after a password reset completes successfully: the user has been
+  // signed out and returned to the login screen to sign in with the new password.
+  // AuthScreen reads this once on mount to show a confirmation notice, then clears it.
+  recoveryComplete: boolean;
+  clearRecoveryComplete: () => void;
 };
 
 const Ctx = createContext<AuthValue | null>(null);
@@ -84,6 +89,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [recoveryNeedsPassword, setRecoveryNeedsPassword] = useState(false);
+  const [recoveryComplete, setRecoveryComplete] = useState(false);
+  const clearRecoveryComplete = () => setRecoveryComplete(false);
 
   useEffect(() => {
     (async () => {
@@ -217,6 +224,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       raiseRecoveryGate();
       return { error: uErr.message, updateFailed: true };
     }
+    // Password changed successfully. Drop the recovery session and send the user
+    // back to the login screen to sign in with the new password (clearer than
+    // silently landing in-app). recoveryComplete drives the confirmation notice.
+    setRecoveryComplete(true);
+    await supabase.auth.signOut();
     return { error: null };
   };
 
@@ -225,6 +237,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) return { error: error.message };
     clearRecoveryNeedsPassword();
+    // Same as the happy path: confirm, then return to login with the new password.
+    setRecoveryComplete(true);
+    await supabase.auth.signOut();
     return { error: null };
   };
 
@@ -275,8 +290,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       hasPasswordIdentity,
       recoveryNeedsPassword,
       clearRecoveryNeedsPassword,
+      recoveryComplete,
+      clearRecoveryComplete,
     }),
-    [session, sessionReady, recoveryNeedsPassword]
+    [session, sessionReady, recoveryNeedsPassword, recoveryComplete]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -24,6 +24,7 @@ import {
 import { Screen, Button } from '../components/ui';
 import { colors, font, radius, space, type as typo } from '../theme/tokens';
 import { useAuth } from '../store/AuthProvider';
+import { passwordIssue } from '../lib/password';
 import type { RootScreenProps } from '../navigation/types';
 
 export function ChangePasswordScreen({ navigation, route }: RootScreenProps<'ChangePassword'>) {
@@ -57,8 +58,9 @@ export function ChangePasswordScreen({ navigation, route }: RootScreenProps<'Cha
       setError('Enter your current password.');
       return;
     }
-    if (next.length < 6) {
-      setError('New password must be at least 6 characters.');
+    const issue = passwordIssue(next);
+    if (issue) {
+      setError(issue);
       return;
     }
     if (next !== confirm) {
