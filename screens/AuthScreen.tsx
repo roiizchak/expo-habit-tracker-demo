@@ -22,6 +22,17 @@ import { useAuth } from '../store/AuthProvider';
 // Public Turnstile site key (safe to ship; the secret lives in the Edge Function).
 const TURNSTILE_SITE_KEY = process.env.EXPO_PUBLIC_TURNSTILE_SITE_KEY;
 
+// Mirrors the server password policy (min length 8 + lower_upper_letters_digits) so the
+// user gets immediate feedback instead of a post-submit server rejection. Server is still
+// authoritative; this is UX. Returns an error string, or null when the password is valid.
+function passwordIssue(pw: string): string | null {
+  if (pw.length < 8) return 'Password must be at least 8 characters.';
+  if (!/[a-z]/.test(pw) || !/[A-Z]/.test(pw) || !/[0-9]/.test(pw)) {
+    return 'Password needs uppercase, lowercase, and a number.';
+  }
+  return null;
+}
+
 export function AuthScreen() {
   const {
     signInWithEmail,
@@ -139,11 +150,14 @@ export function AuthScreen() {
       setError('Enter your email.');
       return;
     }
-    // New accounts must meet the server password policy (>=8). Sign-in stays
-    // length-agnostic so legacy/shorter passwords can still authenticate.
-    if (mode === 'signup' && password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
+    // New accounts must meet the server password policy. Sign-in stays
+    // length/complexity-agnostic so legacy passwords can still authenticate.
+    if (mode === 'signup') {
+      const issue = passwordIssue(password);
+      if (issue) {
+        setError(issue);
+        return;
+      }
     }
     if (mode === 'signin' && !password) {
       setError('Enter your password.');
@@ -177,8 +191,9 @@ export function AuthScreen() {
         setError('Enter the 6-digit code from your email.');
         return;
       }
-      if (newPassword.length < 8) {
-        setError('Password must be at least 8 characters.');
+      const pwIssue = passwordIssue(newPassword);
+      if (pwIssue) {
+        setError(pwIssue);
         return;
       }
       if (newPassword !== confirmPassword) {
