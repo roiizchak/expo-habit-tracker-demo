@@ -62,6 +62,9 @@ type AuthValue = {
   // When verifyOtp succeeded but the password update failed, the server's reason
   // (weak/reused password, etc.) so the forced gate can tell the user what to fix.
   recoveryError: string | null;
+  // True while a recovery password set is finishing (verify -> update -> sign out).
+  // RootNavigator holds the splash on it so the app never flashes before login.
+  recoveryFinishing: boolean;
 };
 
 const Ctx = createContext<AuthValue | null>(null);
@@ -95,6 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [recoveryComplete, setRecoveryComplete] = useState(false);
   const clearRecoveryComplete = () => setRecoveryComplete(false);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [recoveryFinishing, setRecoveryFinishing] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -216,38 +220,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // case where the code was accepted but the password update failed (network blip):
   // the caller then holds a recovery session and can retry without code/old password.
   const verifyPasswordResetOtp = async (email: string, token: string, newPassword: string) => {
-    const { error: vErr } = await supabase.auth.verifyOtp({
-      email: email.trim(),
-      token: token.trim(),
-      type: 'recovery',
-    });
-    if (vErr) return { error: vErr.message };
-    const { error: uErr } = await supabase.auth.updateUser({ password: newPassword });
-    if (uErr) {
-      // verifyOtp already created the session (and unmounted the Auth screen);
-      // raise the recovery gate so the user can finish setting a password, and
-      // carry the server's reason across so the gate can show what to fix.
-      setRecoveryError(uErr.message);
-      raiseRecoveryGate();
-      return { error: uErr.message, updateFailed: true };
+    // verifyOtp creates a live session, which would briefly render the app; hold the
+    // splash (via RootNavigator) until we've updated the password and signed back out.
+    setRecoveryFinishing(true);
+    try {
+      const { error: vErr } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: token.trim(),
+        type: 'recovery',
+      });
+      if (vErr) return { error: vErr.message };
+      const { error: uErr } = await supabase.auth.updateUser({ password: newPassword });
+      if (uErr) {
+        // verifyOtp already created the session (and unmounted the Auth screen);
+        // raise the recovery gate so the user can finish setting a password, and
+        // carry the server's reason across so the gate can show what to fix.
+        setRecoveryError(uErr.message);
+        raiseRecoveryGate();
+        return { error: uErr.message, updateFailed: true };
+      }
+      // Password changed successfully. Drop the recovery session and send the user
+      // back to the login screen to sign in with the new password (clearer than
+      // silently landing in-app). recoveryComplete drives the confirmation notice.
+      setRecoveryComplete(true);
+      await supabase.auth.signOut();
+      return { error: null };
+    } finally {
+      setRecoveryFinishing(false);
     }
-    // Password changed successfully. Drop the recovery session and send the user
-    // back to the login screen to sign in with the new password (clearer than
-    // silently landing in-app). recoveryComplete drives the confirmation notice.
-    setRecoveryComplete(true);
-    await supabase.auth.signOut();
-    return { error: null };
   };
 
   // Retry just the password update on an already-established recovery session.
   const retryPasswordUpdate = async (newPassword: string) => {
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) return { error: error.message };
-    clearRecoveryNeedsPassword();
-    // Same as the happy path: confirm, then return to login with the new password.
-    setRecoveryComplete(true);
-    await supabase.auth.signOut();
-    return { error: null };
+    setRecoveryFinishing(true); // hold the splash so the app doesn't flash before login
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) return { error: error.message };
+      clearRecoveryNeedsPassword();
+      // Same as the happy path: confirm, then return to login with the new password.
+      setRecoveryComplete(true);
+      await supabase.auth.signOut();
+      return { error: null };
+    } finally {
+      setRecoveryFinishing(false);
+    }
   };
 
   // Change the password of the signed-in user. We re-authenticate with the
@@ -300,8 +316,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       recoveryComplete,
       clearRecoveryComplete,
       recoveryError,
+      recoveryFinishing,
     }),
-    [session, sessionReady, recoveryNeedsPassword, recoveryComplete, recoveryError]
+    [session, sessionReady, recoveryNeedsPassword, recoveryComplete, recoveryError, recoveryFinishing]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

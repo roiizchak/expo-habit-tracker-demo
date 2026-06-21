@@ -78,7 +78,7 @@ function Tabs() {
 }
 
 export function RootNavigator() {
-  const { sessionReady, session, recoveryNeedsPassword } = useAuth();
+  const { sessionReady, session, recoveryNeedsPassword, recoveryFinishing } = useAuth();
   const { ready, onboarded } = useStore();
   const onboardedRef = useRef(onboarded);
   onboardedRef.current = onboarded;
@@ -123,8 +123,9 @@ export function RootNavigator() {
     if (onboarded) flushPending();
   }, [onboarded]);
 
-  // Splash while auth resolves, or while the signed-in user's store hydrates.
-  if (!sessionReady || (session && !ready)) {
+  // Splash while auth resolves, while the signed-in user's store hydrates, or while a
+  // recovery password set is finishing (so the app never flashes before bouncing to login).
+  if (!sessionReady || (session && (!ready || recoveryFinishing))) {
     return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   }
 
